@@ -12,6 +12,7 @@ from baseline2.data import (
     HEEWConditionDataset,
 )
 from baseline2.models import ConditionGuidanceTransformer, TMDMDiffusion
+from baseline2.metrics import compute_precision_recall, summarize
 
 
 def _write_tiny_heew(root: Path) -> tuple[Path, Path]:
@@ -91,3 +92,31 @@ def test_model_and_sampling_shapes() -> None:
     assert generated.shape == prediction.shape
     assert torch.isfinite(generated).all()
 
+
+def test_channel_metrics_include_normalized_distribution_scores() -> None:
+    random = np.random.default_rng(7)
+    target = random.normal(size=(8, 4, 24))
+    samples = target[:, None] + random.normal(scale=0.2, size=(8, 6, 4, 24))
+    labels = ["Electricity", "Heat", "Cooling", "PV"]
+    metrics = summarize(
+        samples,
+        target,
+        labels,
+        target_mean=np.array([10.0, 20.0, 30.0, 40.0]),
+        target_std=np.array([2.0, 4.0, 5.0, 8.0]),
+        precision_recall_k=2,
+    )
+    for label in labels:
+        for metric in ("RMSE_Z", "MAE_Z", "Precision_Z", "Recall_Z", "CR", "IW"):
+            assert np.isfinite(metrics[f"{label}_{metric}"])
+        assert 0.0 <= metrics[f"{label}_Precision_Z"] <= 1.0
+        assert 0.0 <= metrics[f"{label}_Recall_Z"] <= 1.0
+        assert 0.0 <= metrics[f"{label}_CR"] <= 1.0
+        assert metrics[f"{label}_IW"] >= 0.0
+
+
+def test_precision_recall_is_one_for_identical_sets() -> None:
+    trajectories = np.arange(8 * 24, dtype=np.float64).reshape(8, 24)
+    precision, recall = compute_precision_recall(trajectories, trajectories, k=2)
+    assert precision == 1.0
+    assert recall == 1.0
