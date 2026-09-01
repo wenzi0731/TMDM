@@ -16,6 +16,7 @@ guidance_model:
   num_layers: 2
   num_heads: 4
   dropout: 0.1
+  latent_samples: 100
   use_pv_year_head: true
   pv_year_film_scale: 0.2
 
@@ -44,4 +45,3 @@ train:
 eval:
   batch_size: 8
   num_scenarios: 100
-
