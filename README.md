@@ -94,6 +94,10 @@ The evaluator saves the same comparison-facing outputs as Baseline 1:
 - `baseline2_scenarios.npz`, with scenarios shaped
   `[day, scenario, channel, hour]`;
 - `metrics_summary.json` and `global_metrics.csv`;
+- per-channel physical-space `RMSE`, `MAE`, `CRPS`, `nCRPS`, 90% coverage and interval width;
+- per-channel normalized `RMSE_Z` and `MAE_Z`, using the 2014--2020 training mean/std;
+- per-channel `Precision_Z` and `Recall_Z` (k-NN manifold scores, `k=5`, in the same z-score space);
+- per-channel `CR` and `IW` for the central 95% interval; `CR` is coverage and `IW` remains in each channel's physical unit;
 - `random_timeseries_50/`;
 - `pearson/` plus `global_pearson.png`.
 
@@ -111,4 +115,3 @@ energy inputs, guidance shape, diffusion loss, and reverse-sampling shape.
 Original TMDM repository and authors should be cited in any publication using
 this adaptation. The upstream repository did not provide a license file; confirm
 reuse and redistribution terms before publishing a derived release.
-
