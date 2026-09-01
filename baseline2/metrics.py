@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+from sklearn.neighbors import NearestNeighbors
 
 
 def crps_map(samples: np.ndarray, target: np.ndarray) -> np.ndarray:
@@ -27,32 +28,129 @@ def crps_map(samples: np.ndarray, target: np.ndarray) -> np.ndarray:
     return term1 - 0.5 * mean_pairwise
 
 
+def compute_precision_recall(
+    generated: np.ndarray, real: np.ndarray, k: int = 5
+) -> tuple[float, float]:
+    """k-NN manifold precision/recall for flattened daily trajectories."""
+    generated_values = np.asarray(generated, dtype=np.float64).reshape(
+        len(generated), -1
+    )
+    real_values = np.asarray(real, dtype=np.float64).reshape(len(real), -1)
+    if len(generated_values) < 2 or len(real_values) < 2:
+        return float("nan"), float("nan")
+    effective_k = min(k, len(generated_values) - 1, len(real_values) - 1)
+
+    def manifold_radius(values: np.ndarray) -> np.ndarray:
+        neighbours = NearestNeighbors(n_neighbors=effective_k + 1).fit(values)
+        distances, _ = neighbours.kneighbors(values)
+        return distances[:, effective_k]
+
+    real_radius = manifold_radius(real_values)
+    generated_radius = manifold_radius(generated_values)
+    distance_to_real, real_index = NearestNeighbors(n_neighbors=1).fit(
+        real_values
+    ).kneighbors(generated_values)
+    precision = np.mean(
+        distance_to_real[:, 0] <= real_radius[real_index[:, 0]]
+    )
+    distance_to_generated, generated_index = NearestNeighbors(n_neighbors=1).fit(
+        generated_values
+    ).kneighbors(real_values)
+    recall = np.mean(
+        distance_to_generated[:, 0]
+        <= generated_radius[generated_index[:, 0]]
+    )
+    return float(precision), float(recall)
+
+
 def summarize(
-    samples: np.ndarray, target: np.ndarray, labels: list[str]
+    samples: np.ndarray,
+    target: np.ndarray,
+    labels: list[str],
+    target_mean: np.ndarray | None = None,
+    target_std: np.ndarray | None = None,
+    seed: int = 42,
+    precision_recall_k: int = 5,
+    max_precision_samples: int = 10_000,
 ) -> dict[str, float]:
-    ensemble_mean = samples.mean(axis=1)
-    error = ensemble_mean - target
-    scores = crps_map(samples, target)
+    values = np.asarray(samples, dtype=np.float64)
+    truth = np.asarray(target, dtype=np.float64)
+    if values.ndim != 4 or truth.shape != (
+        values.shape[0],
+        values.shape[2],
+        values.shape[3],
+    ):
+        raise ValueError("Expected samples [N,S,C,T] and target [N,C,T].")
+    if len(labels) != values.shape[2]:
+        raise ValueError("The number of labels must match the channel count.")
+    channels = values.shape[2]
+    mean = (
+        np.zeros(channels, dtype=np.float64)
+        if target_mean is None
+        else np.asarray(target_mean, dtype=np.float64).reshape(-1)
+    )
+    std = (
+        np.ones(channels, dtype=np.float64)
+        if target_std is None
+        else np.asarray(target_std, dtype=np.float64).reshape(-1)
+    )
+    if mean.shape != (channels,) or std.shape != (channels,):
+        raise ValueError("target_mean and target_std must contain one value per channel.")
+    std = np.maximum(std, 1e-8)
+    values_z = (values - mean.reshape(1, 1, channels, 1)) / std.reshape(
+        1, 1, channels, 1
+    )
+    truth_z = (truth - mean.reshape(1, channels, 1)) / std.reshape(
+        1, channels, 1
+    )
+    ensemble_mean = values.mean(axis=1)
+    error = ensemble_mean - truth
+    normalized_error = values_z.mean(axis=1) - truth_z
+    scores = crps_map(values, truth)
     result: dict[str, float] = {}
     for channel, label in enumerate(labels):
-        channel_target = target[:, channel]
+        channel_target = truth[:, channel]
         channel_crps = scores[:, channel]
-        lower = np.quantile(samples[:, :, channel], 0.05, axis=1)
-        upper = np.quantile(samples[:, :, channel], 0.95, axis=1)
+        lower90 = np.quantile(values[:, :, channel], 0.05, axis=1)
+        upper90 = np.quantile(values[:, :, channel], 0.95, axis=1)
+        lower95 = np.quantile(values[:, :, channel], 0.025, axis=1)
+        upper95 = np.quantile(values[:, :, channel], 0.975, axis=1)
+        generated_pool = values_z[:, :, channel].reshape(-1, values.shape[-1])
+        if len(generated_pool) > max_precision_samples:
+            random = np.random.default_rng(seed + 1000 + channel)
+            selected = random.choice(
+                len(generated_pool), size=max_precision_samples, replace=False
+            )
+            generated_pool = generated_pool[selected]
+        precision, recall = compute_precision_recall(
+            generated_pool, truth_z[:, channel], precision_recall_k
+        )
         result[f"{label}_RMSE"] = float(
             np.sqrt(np.mean(error[:, channel] ** 2))
         )
         result[f"{label}_MAE"] = float(np.mean(np.abs(error[:, channel])))
+        result[f"{label}_RMSE_Z"] = float(
+            np.sqrt(np.mean(normalized_error[:, channel] ** 2))
+        )
+        result[f"{label}_MAE_Z"] = float(
+            np.mean(np.abs(normalized_error[:, channel]))
+        )
         result[f"{label}_CRPS"] = float(np.mean(channel_crps))
         result[f"{label}_nCRPS"] = float(
             np.sum(channel_crps) / (np.sum(np.abs(channel_target)) + 1e-8)
         )
         result[f"{label}_Coverage90"] = float(
-            np.mean((channel_target >= lower) & (channel_target <= upper))
+            np.mean((channel_target >= lower90) & (channel_target <= upper90))
         )
-        result[f"{label}_IntervalWidth90"] = float(np.mean(upper - lower))
+        result[f"{label}_IntervalWidth90"] = float(np.mean(upper90 - lower90))
+        result[f"{label}_Precision_Z"] = precision
+        result[f"{label}_Recall_Z"] = recall
+        result[f"{label}_CR"] = float(
+            np.mean((channel_target >= lower95) & (channel_target <= upper95))
+        )
+        result[f"{label}_IW"] = float(np.mean(upper95 - lower95))
     result["mean_nCRPS"] = float(
-        np.sum(scores) / (np.sum(np.abs(target)) + 1e-8)
+        np.sum(scores) / (np.sum(np.abs(truth)) + 1e-8)
     )
     return result
 
@@ -175,4 +273,3 @@ def save_random_timeseries_plots(
         plt.close(figure)
         saved.append(save_path)
     return saved
-
