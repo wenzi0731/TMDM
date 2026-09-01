@@ -1,0 +1,47 @@
+run:
+  name: tmdm_condition_only_baseline2
+  seed: 42
+  device: auto
+  num_workers: 0
+  output_root: experiments/baseline2
+
+data:
+  energy_path: Data/CN03_energy_cleaned.csv
+  weather_path: Data/weather_cleaned.csv
+  weather_feature_set: pv10
+  seq_len: 24
+
+guidance_model:
+  hidden_dim: 128
+  num_layers: 2
+  num_heads: 4
+  dropout: 0.1
+  use_pv_year_head: true
+  pv_year_film_scale: 0.2
+
+diffusion_model:
+  hidden_dim: 128
+  num_layers: 3
+
+diffusion:
+  timesteps: 100
+  beta_schedule: linear
+  beta_start: 0.0001
+  beta_end: 0.02
+
+train:
+  batch_size: 32
+  guidance_epochs: 80
+  diffusion_epochs: 300
+  guidance_learning_rate: 0.0003
+  joint_learning_rate: 0.0001
+  weight_decay: 0.0001
+  gradient_clip: 1.0
+  patience: 30
+  k_cond: 1.0
+  k_z: 0.01
+
+eval:
+  batch_size: 8
+  num_scenarios: 100
+
