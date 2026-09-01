@@ -21,6 +21,7 @@ class ConditionGuidanceTransformer(nn.Module):
         num_layers: int = 2,
         num_heads: int = 4,
         dropout: float = 0.1,
+        latent_samples: int = 100,
         pv_channel_idx: int = 3,
         use_pv_year_head: bool = True,
         pv_year_film_scale: float = 0.2,
@@ -29,6 +30,9 @@ class ConditionGuidanceTransformer(nn.Module):
         self.seq_len = seq_len
         self.pv_channel_idx = pv_channel_idx
         self.pv_year_film_scale = pv_year_film_scale
+        if latent_samples < 1:
+            raise ValueError("latent_samples must be positive")
+        self.latent_samples = int(latent_samples)
         self.input_projection = nn.Linear(condition_channels, hidden_dim)
         self.position = nn.Parameter(torch.zeros(1, seq_len, hidden_dim))
         layer = nn.TransformerEncoderLayer(
@@ -66,7 +70,12 @@ class ConditionGuidanceTransformer(nn.Module):
         mean = self.z_mean(tokens)
         logvar = self.z_logvar(tokens).clamp(-12.0, 12.0)
         if self.training:
-            latent = mean + torch.randn_like(mean) * torch.exp(0.5 * logvar)
+            # The original TMDM averages 100 reparameterized samples. The mean
+            # of those samples has this identical Gaussian distribution without
+            # materializing a 100x larger tensor.
+            latent = mean + torch.randn_like(mean) * torch.exp(0.5 * logvar) / math.sqrt(
+                self.latent_samples
+            )
         else:
             latent = mean
         latent = self.z_out(latent)
@@ -260,6 +269,7 @@ def build_guidance_model(
         num_layers=int(model["num_layers"]),
         num_heads=int(model["num_heads"]),
         dropout=float(model["dropout"]),
+        latent_samples=int(model.get("latent_samples", 100)),
         use_pv_year_head=bool(model.get("use_pv_year_head", True)),
         pv_year_film_scale=float(model.get("pv_year_film_scale", 0.2)),
     )
@@ -297,4 +307,3 @@ def checkpoint_payload(
     if diffusion is not None:
         payload["diffusion_model"] = deepcopy(diffusion.state_dict())
     return payload
-
