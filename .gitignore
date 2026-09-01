@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+checkpoints/
+experiments/
+evaluation_results/
+Data/*.csv
+*.pt
+*.pth
+*.npz
+
