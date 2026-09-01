@@ -109,11 +109,20 @@ def main() -> None:
         deterministic=points,
         dates=np.asarray(all_dates),
         channel_names=np.asarray(dataset.target_cols),
+        target_mean=np.asarray(dataset.target_mean),
+        target_std=np.asarray(dataset.target_std),
         seed=seed,
         sampler="tmdm_ancestral",
         num_scenarios=scenario_count,
     )
-    metrics = summarize(scenarios, targets, dataset.target_cols)
+    metrics = summarize(
+        scenarios,
+        targets,
+        dataset.target_cols,
+        target_mean=np.asarray(dataset.target_mean),
+        target_std=np.asarray(dataset.target_std),
+        seed=seed,
+    )
     random_timeseries_dir = output_dir / "random_timeseries_50"
     random_paths = save_random_timeseries_plots(
         targets,
@@ -141,6 +150,9 @@ def main() -> None:
         "num_scenarios": scenario_count,
         "sampler": "tmdm_ancestral",
         "seed": seed,
+        "normalized_metric_space": "training-split z-score",
+        "precision_recall": "k-NN manifold metric in z-score space (k=5)",
+        "cr_iw_interval": "central 95% interval (2.5%-97.5%) in physical space",
         "archive": str(archive),
         **metrics,
         **pearson_metrics,
@@ -158,4 +170,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
